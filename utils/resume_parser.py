@@ -2,31 +2,9 @@ import pdfplumber
 import docx
 import re
 from typing import Dict, List, Optional
-import nltk
-import os
-
-# ONE-TIME FIX: Download ALL required NLTK data
-def download_nltk_resources():
-    resources = ['punkt', 'stopwords', 'averaged_perceptron_tagger', 'punkt_tab']
-    for resource in resources:
-        try:
-            nltk.download(resource, quiet=True)
-        except:
-            pass  # Ignore errors and try next resource
-
-# Call this once at startup
-download_nltk_resources()
-
-from nltk.tokenize import sent_tokenize, word_tokenize
-from nltk.corpus import stopwords
-from nltk.tag import pos_tag
 
 class ResumeParser:
     def __init__(self):
-        # Ensure NLTK resources are available with fallbacks
-        self._ensure_nltk_resources()
-        self.stop_words = set(stopwords.words('english'))
-        
         # Enhanced skill keywords
         self.technical_skills = {
             'programming': ['python', 'java', 'javascript', 'c++', 'c#', 'ruby', 'go', 'rust', 'swift', 'kotlin'],
@@ -38,21 +16,15 @@ class ResumeParser:
         }
         
         self.education_keywords = ['university', 'college', 'institute', 'bachelor', 'master', 'phd', 'degree']
-
-    def _ensure_nltk_resources(self):
-        """Ensure all required NLTK resources are available with multiple fallbacks"""
-        resources_to_try = [
-            'punkt_tab',
-            'punkt',
-            'stopwords', 
-            'averaged_perceptron_tagger'
-        ]
-        
-        for resource in resources_to_try:
-            try:
-                nltk.download(resource, quiet=True)
-            except:
-                continue  # Try next resource if this fails
+        self.stop_words = {'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", 
+                          "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 
+                          'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 
+                          'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 
+                          'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 
+                          'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 
+                          'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 
+                          'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 
+                          'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once'}
 
     def extract_text_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
@@ -128,7 +100,7 @@ class ResumeParser:
             'education': self.extract_education(text),
             'sections': self.extract_sections(text),
             'stats': self.calculate_stats(text),
-            'entities': self.extract_entities_nltk(text)
+            'entities': self.extract_entities(text)
         }
 
     def extract_sections(self, text: str) -> Dict:
@@ -246,49 +218,32 @@ class ResumeParser:
                 return degree.capitalize()
         return "Unknown"
 
-    def extract_entities_nltk(self, text: str) -> Dict:
-        """Extract named entities using NLTK"""
-        try:
-            tokens = word_tokenize(text)
-            pos_tags = pos_tag(tokens)
-            
-            entities = {
-                'organizations': [],
-                'persons': [],
-                'locations': []
-            }
-            
-            for token, pos in pos_tags:
-                if pos == 'NNP':
-                    if token.lower() not in self.stop_words and len(token) > 1:
-                        if token.istitle() and not any(char.isdigit() for char in token):
-                            entities['persons'].append(token)
-            
-            return entities
-        except Exception as e:
-            return {'organizations': [], 'persons': [], 'locations': []}
+    def extract_entities(self, text: str) -> Dict:
+        """Extract named entities using regex and simple rules"""
+        entities = {
+            'organizations': [],
+            'persons': [],
+            'locations': []
+        }
+        
+        # Simple entity extraction using capitalization rules
+        words = re.findall(r'\b[A-Z][a-z]+\b', text)
+        for word in words:
+            if word.lower() not in self.stop_words and len(word) > 1:
+                if word.istitle() and not any(char.isdigit() for char in word):
+                    entities['persons'].append(word)
+        
+        return entities
 
     def calculate_stats(self, text: str) -> Dict:
-        """Calculate resume statistics"""
-        try:
-            # Fallback to simple split if NLTK fails
-            try:
-                words = word_tokenize(text)
-                sentences = sent_tokenize(text)
-            except:
-                words = text.split()
-                sentences = text.split('.')
-            
-            return {
-                'word_count': len(words),
-                'sentence_count': len(sentences),
-                'avg_sentence_length': len(words) / len(sentences) if sentences else 0,
-                'unique_words': len(set(words))
-            }
-        except Exception as e:
-            return {
-                'word_count': 0,
-                'sentence_count': 0,
-                'avg_sentence_length': 0,
-                'unique_words': 0
-            }
+        """Calculate resume statistics using simple string methods"""
+        words = re.findall(r'\b\w+\b', text)
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
+        
+        return {
+            'word_count': len(words),
+            'sentence_count': len(sentences),
+            'avg_sentence_length': len(words) / len(sentences) if sentences else 0,
+            'unique_words': len(set(words))
+        }
