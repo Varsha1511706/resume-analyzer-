@@ -20,8 +20,18 @@ except LookupError:
 
 class ResumeParser:
     def __init__(self):
-        self.nlp = spacy.load("en_core_web_sm")
+        self.nlp = None
+        self.use_spacy = False
         self.stop_words = set(stopwords.words('english'))
+        
+        # Try to load spaCy model, fallback to NLTK if not available
+        try:
+            self.nlp = spacy.load("en_core_web_sm")
+            self.use_spacy = True
+            print("spaCy model loaded successfully")
+        except OSError:
+            print("spaCy model not found, using NLTK for text processing")
+            self.use_spacy = False
         
         # Enhanced skill keywords
         self.technical_skills = {
@@ -83,7 +93,8 @@ class ResumeParser:
             'experience': self.extract_experience(text),
             'education': self.extract_education(text),
             'sections': sections,
-            'stats': self.calculate_stats(text)
+            'stats': self.calculate_stats(text),
+            'processing_engine': 'spaCy' if self.use_spacy else 'NLTK'
         }
 
     def extract_sections(self, text: str) -> Dict:
@@ -164,9 +175,10 @@ class ResumeParser:
         for i, line in enumerate(lines):
             line = line.strip()
             # Simple pattern matching for experience entries
-            if re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line, re.IGNORECASE):
+            duration_match = re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line, re.IGNORECASE)
+            if duration_match:
                 exp_entry = {
-                    'duration': re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line).group(),
+                    'duration': duration_match.group(),
                     'position': line,
                     'company': self.extract_company_name(line)
                 }
