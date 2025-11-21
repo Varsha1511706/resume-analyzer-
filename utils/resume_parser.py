@@ -5,33 +5,27 @@ from typing import Dict, List, Optional
 import nltk
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
-import spacy
+from nltk.tag import pos_tag
 
 # Download required NLTK data
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
-    nltk.download('punkt')
+    nltk.download('punkt', quiet=True)
 
 try:
     nltk.data.find('corpora/stopwords')
 except LookupError:
-    nltk.download('stopwords')
+    nltk.download('stopwords', quiet=True)
+
+try:
+    nltk.data.find('taggers/averaged_perceptron_tagger')
+except LookupError:
+    nltk.download('averaged_perceptron_tagger', quiet=True)
 
 class ResumeParser:
     def __init__(self):
-        self.nlp = None
-        self.use_spacy = False
         self.stop_words = set(stopwords.words('english'))
-        
-        # Try to load spaCy model, fallback to NLTK if not available
-        try:
-            self.nlp = spacy.load("en_core_web_sm")
-            self.use_spacy = True
-            print("spaCy model loaded successfully")
-        except OSError:
-            print("spaCy model not found, using NLTK for text processing")
-            self.use_spacy = False
         
         # Enhanced skill keywords
         self.technical_skills = {
@@ -94,7 +88,7 @@ class ResumeParser:
             'education': self.extract_education(text),
             'sections': sections,
             'stats': self.calculate_stats(text),
-            'processing_engine': 'spaCy' if self.use_spacy else 'NLTK'
+            'entities': self.extract_entities_nltk(text)
         }
 
     def extract_sections(self, text: str) -> Dict:
@@ -217,6 +211,27 @@ class ResumeParser:
             if degree in line_lower:
                 return degree.capitalize()
         return "Unknown"
+
+    def extract_entities_nltk(self, text: str) -> Dict:
+        """Extract named entities using NLTK"""
+        tokens = word_tokenize(text)
+        pos_tags = pos_tag(tokens)
+        
+        entities = {
+            'organizations': [],
+            'persons': [],
+            'locations': []
+        }
+        
+        # Simple rule-based entity extraction
+        for token, pos in pos_tags:
+            if pos == 'NNP':  # Proper noun
+                if token.lower() not in self.stop_words and len(token) > 1:
+                    # Simple heuristic: assume it's a person if it's a proper noun and not in common words
+                    if token.istitle() and not any(char.isdigit() for char in token):
+                        entities['persons'].append(token)
+        
+        return entities
 
     def calculate_stats(self, text: str) -> Dict:
         """Calculate resume statistics"""
