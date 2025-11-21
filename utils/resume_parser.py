@@ -3,29 +3,27 @@ import docx
 import re
 from typing import Dict, List, Optional
 import nltk
+import os
+
+# ONE-TIME FIX: Download ALL required NLTK data
+def download_nltk_resources():
+    resources = ['punkt', 'stopwords', 'averaged_perceptron_tagger', 'punkt_tab']
+    for resource in resources:
+        try:
+            nltk.download(resource, quiet=True)
+        except:
+            pass  # Ignore errors and try next resource
+
+# Call this once at startup
+download_nltk_resources()
+
 from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
 from nltk.tag import pos_tag
 
-# Download required NLTK data with updated punkt_tab
-try:
-    nltk.data.find('tokenizers/punkt_tab')
-except LookupError:
-    nltk.download('punkt_tab', quiet=True)
-
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords', quiet=True)
-
-try:
-    nltk.data.find('taggers/averaged_perceptron_tagger')
-except LookupError:
-    nltk.download('averaged_perceptron_tagger', quiet=True)
-
 class ResumeParser:
     def __init__(self):
-        # Ensure downloads are complete before initializing
+        # Ensure NLTK resources are available with fallbacks
         self._ensure_nltk_resources()
         self.stop_words = set(stopwords.words('english'))
         
@@ -42,19 +40,19 @@ class ResumeParser:
         self.education_keywords = ['university', 'college', 'institute', 'bachelor', 'master', 'phd', 'degree']
 
     def _ensure_nltk_resources(self):
-        """Ensure all required NLTK resources are available"""
-        resources = {
-            'punkt_tab': 'tokenizers/punkt_tab',
-            'stopwords': 'corpora/stopwords',
-            'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger'
-        }
+        """Ensure all required NLTK resources are available with multiple fallbacks"""
+        resources_to_try = [
+            'punkt_tab',
+            'punkt',
+            'stopwords', 
+            'averaged_perceptron_tagger'
+        ]
         
-        for resource_name, resource_path in resources.items():
+        for resource in resources_to_try:
             try:
-                nltk.data.find(resource_path)
-            except LookupError:
-                print(f"Downloading NLTK resource: {resource_name}")
-                nltk.download(resource_name, quiet=True)
+                nltk.download(resource, quiet=True)
+            except:
+                continue  # Try next resource if this fails
 
     def extract_text_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
@@ -122,16 +120,13 @@ class ResumeParser:
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
         
-        # Extract sections
-        sections = self.extract_sections(text)
-        
         return {
             'raw_text': text,
             'personal_info': self.extract_personal_info(text),
             'skills': self.extract_skills(text),
             'experience': self.extract_experience(text),
             'education': self.extract_education(text),
-            'sections': sections,
+            'sections': self.extract_sections(text),
             'stats': self.calculate_stats(text),
             'entities': self.extract_entities_nltk(text)
         }
@@ -149,7 +144,6 @@ class ResumeParser:
             if not line:
                 continue
                 
-            # Check if line is a section header
             if self.is_section_header(line):
                 if current_section and section_content:
                     sections[current_section] = ' '.join(section_content)
@@ -180,11 +174,8 @@ class ResumeParser:
 
     def extract_personal_info(self, text: str) -> Dict:
         """Extract personal information"""
-        # Email
         emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-        # Phone numbers
         phones = re.findall(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', text)
-        # LinkedIn profile
         linkedin = re.findall(r'(https?://)?(www\.)?linkedin\.com/in/[A-Za-z0-9-]+', text)
         
         return {
@@ -213,7 +204,6 @@ class ResumeParser:
         
         for i, line in enumerate(lines):
             line = line.strip()
-            # Simple pattern matching for experience entries
             duration_match = re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line, re.IGNORECASE)
             if duration_match:
                 exp_entry = {
@@ -227,7 +217,6 @@ class ResumeParser:
 
     def extract_company_name(self, line: str) -> str:
         """Extract company name from experience line"""
-        # Remove duration and position words to get company name
         cleaned = re.sub(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', '', line)
         cleaned = re.sub(r'\b(senior|junior|lead|manager|director|engineer|developer|analyst)\b', '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip()
@@ -269,23 +258,26 @@ class ResumeParser:
                 'locations': []
             }
             
-            # Simple rule-based entity extraction
             for token, pos in pos_tags:
-                if pos == 'NNP':  # Proper noun
+                if pos == 'NNP':
                     if token.lower() not in self.stop_words and len(token) > 1:
-                        # Simple heuristic: assume it's a person if it's a proper noun and not in common words
                         if token.istitle() and not any(char.isdigit() for char in token):
                             entities['persons'].append(token)
             
             return entities
         except Exception as e:
-            return {'organizations': [], 'persons': [], 'locations': [], 'error': str(e)}
+            return {'organizations': [], 'persons': [], 'locations': []}
 
     def calculate_stats(self, text: str) -> Dict:
         """Calculate resume statistics"""
         try:
-            words = word_tokenize(text)
-            sentences = sent_tokenize(text)
+            # Fallback to simple split if NLTK fails
+            try:
+                words = word_tokenize(text)
+                sentences = sent_tokenize(text)
+            except:
+                words = text.split()
+                sentences = text.split('.')
             
             return {
                 'word_count': len(words),
@@ -298,6 +290,5 @@ class ResumeParser:
                 'word_count': 0,
                 'sentence_count': 0,
                 'avg_sentence_length': 0,
-                'unique_words': 0,
-                'error': str(e)
+                'unique_words': 0
             }
