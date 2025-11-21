@@ -7,11 +7,11 @@ from nltk.tokenize import sent_tokenize, word_tokenize
 from nltk.corpus import stopwords
 from nltk.tag import pos_tag
 
-# Download required NLTK data
+# Download required NLTK data with updated punkt_tab
 try:
-    nltk.data.find('tokenizers/punkt')
+    nltk.data.find('tokenizers/punkt_tab')
 except LookupError:
-    nltk.download('punkt', quiet=True)
+    nltk.download('punkt_tab', quiet=True)
 
 try:
     nltk.data.find('corpora/stopwords')
@@ -25,6 +25,8 @@ except LookupError:
 
 class ResumeParser:
     def __init__(self):
+        # Ensure downloads are complete before initializing
+        self._ensure_nltk_resources()
         self.stop_words = set(stopwords.words('english'))
         
         # Enhanced skill keywords
@@ -39,16 +41,32 @@ class ResumeParser:
         
         self.education_keywords = ['university', 'college', 'institute', 'bachelor', 'master', 'phd', 'degree']
 
+    def _ensure_nltk_resources(self):
+        """Ensure all required NLTK resources are available"""
+        resources = {
+            'punkt_tab': 'tokenizers/punkt_tab',
+            'stopwords': 'corpora/stopwords',
+            'averaged_perceptron_tagger': 'taggers/averaged_perceptron_tagger'
+        }
+        
+        for resource_name, resource_path in resources.items():
+            try:
+                nltk.data.find(resource_path)
+            except LookupError:
+                print(f"Downloading NLTK resource: {resource_name}")
+                nltk.download(resource_name, quiet=True)
+
     def extract_text_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
         text = ""
         try:
             with pdfplumber.open(file_path) as pdf:
                 for page in pdf.pages:
-                    text += page.extract_text() or ""
+                    page_text = page.extract_text() or ""
+                    text += page_text + "\n"
         except Exception as e:
             raise Exception(f"Error reading PDF: {str(e)}")
-        return text
+        return text.strip()
 
     def extract_text_from_docx(self, file_path: str) -> str:
         """Extract text from DOCX file"""
@@ -56,24 +74,51 @@ class ResumeParser:
         try:
             doc = docx.Document(file_path)
             for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
+                if paragraph.text.strip():
+                    text += paragraph.text + "\n"
         except Exception as e:
             raise Exception(f"Error reading DOCX: {str(e)}")
-        return text
+        return text.strip()
 
     def parse_resume(self, file_path: str, file_type: str) -> Dict:
         """Main method to parse resume and extract information"""
-        if file_type == "pdf":
-            text = self.extract_text_from_pdf(file_path)
-        elif file_type == "docx":
-            text = self.extract_text_from_docx(file_path)
-        else:
-            raise ValueError("Unsupported file format")
+        try:
+            if file_type == "pdf":
+                text = self.extract_text_from_pdf(file_path)
+            elif file_type == "docx":
+                text = self.extract_text_from_docx(file_path)
+            else:
+                raise ValueError("Unsupported file format")
 
-        return self.analyze_text(text)
+            return self.analyze_text(text)
+        except Exception as e:
+            return {
+                'error': f"Error processing resume: {str(e)}",
+                'raw_text': '',
+                'personal_info': {},
+                'skills': {},
+                'experience': [],
+                'education': [],
+                'sections': {},
+                'stats': {},
+                'entities': {}
+            }
 
     def analyze_text(self, text: str) -> Dict:
         """Analyze extracted text and structure information"""
+        if not text:
+            return {
+                'error': "No text extracted from resume",
+                'raw_text': '',
+                'personal_info': {},
+                'skills': {},
+                'experience': [],
+                'education': [],
+                'sections': {},
+                'stats': {},
+                'entities': {}
+            }
+
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
         
@@ -214,33 +259,45 @@ class ResumeParser:
 
     def extract_entities_nltk(self, text: str) -> Dict:
         """Extract named entities using NLTK"""
-        tokens = word_tokenize(text)
-        pos_tags = pos_tag(tokens)
-        
-        entities = {
-            'organizations': [],
-            'persons': [],
-            'locations': []
-        }
-        
-        # Simple rule-based entity extraction
-        for token, pos in pos_tags:
-            if pos == 'NNP':  # Proper noun
-                if token.lower() not in self.stop_words and len(token) > 1:
-                    # Simple heuristic: assume it's a person if it's a proper noun and not in common words
-                    if token.istitle() and not any(char.isdigit() for char in token):
-                        entities['persons'].append(token)
-        
-        return entities
+        try:
+            tokens = word_tokenize(text)
+            pos_tags = pos_tag(tokens)
+            
+            entities = {
+                'organizations': [],
+                'persons': [],
+                'locations': []
+            }
+            
+            # Simple rule-based entity extraction
+            for token, pos in pos_tags:
+                if pos == 'NNP':  # Proper noun
+                    if token.lower() not in self.stop_words and len(token) > 1:
+                        # Simple heuristic: assume it's a person if it's a proper noun and not in common words
+                        if token.istitle() and not any(char.isdigit() for char in token):
+                            entities['persons'].append(token)
+            
+            return entities
+        except Exception as e:
+            return {'organizations': [], 'persons': [], 'locations': [], 'error': str(e)}
 
     def calculate_stats(self, text: str) -> Dict:
         """Calculate resume statistics"""
-        words = word_tokenize(text)
-        sentences = sent_tokenize(text)
-        
-        return {
-            'word_count': len(words),
-            'sentence_count': len(sentences),
-            'avg_sentence_length': len(words) / len(sentences) if sentences else 0,
-            'unique_words': len(set(words))
-        }
+        try:
+            words = word_tokenize(text)
+            sentences = sent_tokenize(text)
+            
+            return {
+                'word_count': len(words),
+                'sentence_count': len(sentences),
+                'avg_sentence_length': len(words) / len(sentences) if sentences else 0,
+                'unique_words': len(set(words))
+            }
+        except Exception as e:
+            return {
+                'word_count': 0,
+                'sentence_count': 0,
+                'avg_sentence_length': 0,
+                'unique_words': 0,
+                'error': str(e)
+            }
