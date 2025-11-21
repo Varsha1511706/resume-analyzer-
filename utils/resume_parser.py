@@ -2,27 +2,9 @@ import pdfplumber
 import docx
 import re
 from typing import Dict, List, Optional
-import nltk
-from nltk.tokenize import sent_tokenize, word_tokenize
-from nltk.corpus import stopwords
-import spacy
-
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
 
 class ResumeParser:
     def __init__(self):
-        self.nlp = spacy.load("en_core_web_sm")
-        self.stop_words = set(stopwords.words('english'))
-        
         # Enhanced skill keywords
         self.technical_skills = {
             'programming': ['python', 'java', 'javascript', 'c++', 'c#', 'ruby', 'go', 'rust', 'swift', 'kotlin'],
@@ -34,6 +16,15 @@ class ResumeParser:
         }
         
         self.education_keywords = ['university', 'college', 'institute', 'bachelor', 'master', 'phd', 'degree']
+        self.stop_words = {'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", 
+                          "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 
+                          'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 
+                          'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 
+                          'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 
+                          'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 
+                          'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 
+                          'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 
+                          'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once'}
 
     def extract_text_from_pdf(self, file_path: str) -> str:
         """Extract text from PDF file"""
@@ -41,10 +32,11 @@ class ResumeParser:
         try:
             with pdfplumber.open(file_path) as pdf:
                 for page in pdf.pages:
-                    text += page.extract_text() or ""
+                    page_text = page.extract_text() or ""
+                    text += page_text + "\n"
         except Exception as e:
             raise Exception(f"Error reading PDF: {str(e)}")
-        return text
+        return text.strip()
 
     def extract_text_from_docx(self, file_path: str) -> str:
         """Extract text from DOCX file"""
@@ -52,29 +44,53 @@ class ResumeParser:
         try:
             doc = docx.Document(file_path)
             for paragraph in doc.paragraphs:
-                text += paragraph.text + "\n"
+                if paragraph.text.strip():
+                    text += paragraph.text + "\n"
         except Exception as e:
             raise Exception(f"Error reading DOCX: {str(e)}")
-        return text
+        return text.strip()
 
     def parse_resume(self, file_path: str, file_type: str) -> Dict:
         """Main method to parse resume and extract information"""
-        if file_type == "pdf":
-            text = self.extract_text_from_pdf(file_path)
-        elif file_type == "docx":
-            text = self.extract_text_from_docx(file_path)
-        else:
-            raise ValueError("Unsupported file format")
+        try:
+            if file_type == "pdf":
+                text = self.extract_text_from_pdf(file_path)
+            elif file_type == "docx":
+                text = self.extract_text_from_docx(file_path)
+            else:
+                raise ValueError("Unsupported file format")
 
-        return self.analyze_text(text)
+            return self.analyze_text(text)
+        except Exception as e:
+            return {
+                'error': f"Error processing resume: {str(e)}",
+                'raw_text': '',
+                'personal_info': {},
+                'skills': {},
+                'experience': [],
+                'education': [],
+                'sections': {},
+                'stats': {},
+                'entities': {}
+            }
 
     def analyze_text(self, text: str) -> Dict:
         """Analyze extracted text and structure information"""
+        if not text:
+            return {
+                'error': "No text extracted from resume",
+                'raw_text': '',
+                'personal_info': {},
+                'skills': {},
+                'experience': [],
+                'education': [],
+                'sections': {},
+                'stats': {},
+                'entities': {}
+            }
+
         # Clean text
         text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Extract sections
-        sections = self.extract_sections(text)
         
         return {
             'raw_text': text,
@@ -82,8 +98,9 @@ class ResumeParser:
             'skills': self.extract_skills(text),
             'experience': self.extract_experience(text),
             'education': self.extract_education(text),
-            'sections': sections,
-            'stats': self.calculate_stats(text)
+            'sections': self.extract_sections(text),
+            'stats': self.calculate_stats(text),
+            'entities': self.extract_entities(text)
         }
 
     def extract_sections(self, text: str) -> Dict:
@@ -99,7 +116,6 @@ class ResumeParser:
             if not line:
                 continue
                 
-            # Check if line is a section header
             if self.is_section_header(line):
                 if current_section and section_content:
                     sections[current_section] = ' '.join(section_content)
@@ -130,11 +146,8 @@ class ResumeParser:
 
     def extract_personal_info(self, text: str) -> Dict:
         """Extract personal information"""
-        # Email
         emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', text)
-        # Phone numbers
         phones = re.findall(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', text)
-        # LinkedIn profile
         linkedin = re.findall(r'(https?://)?(www\.)?linkedin\.com/in/[A-Za-z0-9-]+', text)
         
         return {
@@ -163,10 +176,10 @@ class ResumeParser:
         
         for i, line in enumerate(lines):
             line = line.strip()
-            # Simple pattern matching for experience entries
-            if re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line, re.IGNORECASE):
+            duration_match = re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line, re.IGNORECASE)
+            if duration_match:
                 exp_entry = {
-                    'duration': re.search(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', line).group(),
+                    'duration': duration_match.group(),
                     'position': line,
                     'company': self.extract_company_name(line)
                 }
@@ -176,7 +189,6 @@ class ResumeParser:
 
     def extract_company_name(self, line: str) -> str:
         """Extract company name from experience line"""
-        # Remove duration and position words to get company name
         cleaned = re.sub(r'\b(\d{4})\s*[-–]\s*(\d{4}|present|current)\b', '', line)
         cleaned = re.sub(r'\b(senior|junior|lead|manager|director|engineer|developer|analyst)\b', '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip()
@@ -206,10 +218,28 @@ class ResumeParser:
                 return degree.capitalize()
         return "Unknown"
 
+    def extract_entities(self, text: str) -> Dict:
+        """Extract named entities using regex and simple rules"""
+        entities = {
+            'organizations': [],
+            'persons': [],
+            'locations': []
+        }
+        
+        # Simple entity extraction using capitalization rules
+        words = re.findall(r'\b[A-Z][a-z]+\b', text)
+        for word in words:
+            if word.lower() not in self.stop_words and len(word) > 1:
+                if word.istitle() and not any(char.isdigit() for char in word):
+                    entities['persons'].append(word)
+        
+        return entities
+
     def calculate_stats(self, text: str) -> Dict:
-        """Calculate resume statistics"""
-        words = word_tokenize(text)
-        sentences = sent_tokenize(text)
+        """Calculate resume statistics using simple string methods"""
+        words = re.findall(r'\b\w+\b', text)
+        sentences = re.split(r'[.!?]+', text)
+        sentences = [s.strip() for s in sentences if s.strip()]
         
         return {
             'word_count': len(words),
