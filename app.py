@@ -1,3 +1,21 @@
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
+# Disable NLTK downloads and usage
+os.environ['NLTK_DATA'] = '/tmp/nltk_data'
+
+# Mock NLTK to prevent downloads
+try:
+    import nltk
+    nltk.data.path = ['/tmp/nltk_data']  # Set to non-existent path
+except ImportError:
+    pass
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+# ... rest of your imports
 import streamlit as st
 import pandas as pd
 import plotly.express as px
